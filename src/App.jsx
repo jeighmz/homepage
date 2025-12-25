@@ -100,6 +100,7 @@ function App() {
   const [currentTime, setCurrentTime] = useState(new Date())
   const [favorites, setFavorites] = useState([])
   const [editingFavorite, setEditingFavorite] = useState(null)
+  const [apps, setApps] = useState([])
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -124,7 +125,7 @@ function App() {
         console.warn('Firestore load timeout, using localStorage fallback')
         loadFromLocalStorage()
         setIsLoading(false)
-      }, 5000) // 5 second timeout
+      }, 3000) // 3 second timeout
       
       const loadFromLocalStorage = () => {
         const savedGoals = localStorage.getItem('hobbi-goals')
@@ -151,6 +152,20 @@ function App() {
             console.error('Failed to load favorites from localStorage', e)
           }
         }
+        
+        const savedApps = localStorage.getItem('hobbi-apps')
+        if (savedApps) {
+          try {
+            const parsed = JSON.parse(savedApps)
+            const appsWithFavicons = parsed.map(app => ({
+              ...app,
+              favicon: app.favicon || getFaviconUrl(app.url)
+            }))
+            setApps(appsWithFavicons)
+          } catch (e) {
+            console.error('Failed to load apps from localStorage', e)
+          }
+        }
       }
       
       try {
@@ -170,12 +185,20 @@ function App() {
             }))
             setFavorites(favoritesWithFavicons)
           }
+          if (data.apps && Array.isArray(data.apps)) {
+            // Ensure all apps have favicons
+            const appsWithFavicons = data.apps.map(app => ({
+              ...app,
+              favicon: app.favicon || getFaviconUrl(app.url)
+            }))
+            setApps(appsWithFavicons)
+          }
         } else {
           // Document doesn't exist, try localStorage fallback
           loadFromLocalStorage()
         }
       } catch (error) {
-        clearTimeout(timeout)
+        if (timeout) clearTimeout(timeout)
         console.error('Failed to load data from Firestore:', error)
         // Fallback to localStorage if Firestore fails
         loadFromLocalStorage()
@@ -413,10 +436,6 @@ function App() {
     fetchWeather()
   }, [])
 
-  // Save favorites to localStorage
-  useEffect(() => {
-    localStorage.setItem('hobbi-favorites', JSON.stringify(favorites))
-  }, [favorites])
 
   // Update clock every second
   useEffect(() => {
@@ -441,6 +460,9 @@ function App() {
   }, [])
 
   const stats = useMemo(() => {
+    if (!goals || goals.length === 0) {
+      return { completed: 0, total: 0, overallProgress: 0, onTrack: 0 }
+    }
     const completed = goals.filter(g => g.current >= g.target).length
     const total = goals.length
     const overallProgress = goals.reduce((sum, goal) => sum + (goal.current / goal.target), 0) / goals.length * 100
@@ -609,12 +631,48 @@ function App() {
     }
   }
 
+  const handleAddApp = () => {
+    const url = prompt('Enter URL:')
+    const title = prompt('Enter title:') || 'New App'
+    if (url) {
+      const fullUrl = url.startsWith('http') ? url : `https://${url}`
+      const newApp = {
+        id: Date.now(),
+        title,
+        url: fullUrl,
+        icon: '📱',
+        favicon: getFaviconUrl(fullUrl)
+      }
+      setApps([...apps, newApp])
+    }
+  }
+
+  const handleDeleteApp = (id) => {
+    if (window.confirm('Delete this app?')) {
+      setApps(apps.filter(a => a.id !== id))
+    }
+  }
+
+  const handleEditApp = (app) => {
+    const newTitle = prompt('Enter new title:', app.title)
+    const newUrl = prompt('Enter new URL:', app.url)
+    if (newTitle && newUrl) {
+      const fullUrl = newUrl.startsWith('http') ? newUrl : `https://${newUrl}`
+      setApps(apps.map(a => 
+        a.id === app.id 
+          ? { ...a, title: newTitle, url: fullUrl, favicon: getFaviconUrl(fullUrl) }
+          : a
+      ))
+    }
+  }
+
   const handleSaveToFirestore = async () => {
     try {
       setIsSaving(true)
       await setDoc(doc(db, 'dashboard', 'data'), {
         goals: goals,
         favorites: favorites,
+        apps: apps,
         lastUpdated: new Date().toISOString()
       })
       alert('Saved successfully!')
@@ -737,6 +795,64 @@ function App() {
           </div>
         </div>
 
+        <div className="apps-section">
+          <div className="apps-header">
+            <h2 className="apps-title">My Apps</h2>
+            <button className="app-add-btn" onClick={handleAddApp} title="Add App">
+              +
+            </button>
+          </div>
+          <div className="apps-grid">
+            {apps.length > 0 ? (
+              apps.map(app => (
+                <div key={app.id} className="app-item">
+                  <a 
+                    href={app.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="app-link"
+                  >
+                    <div className="app-icon">
+                      {app.favicon ? (
+                        <img 
+                          src={app.favicon} 
+                          alt={app.title}
+                          onError={(e) => {
+                            e.target.style.display = 'none'
+                            e.target.nextSibling.style.display = 'flex'
+                          }}
+                        />
+                      ) : null}
+                      <span style={{ display: app.favicon ? 'none' : 'flex' }}>{app.icon}</span>
+                    </div>
+                    <div className="app-title">{app.title}</div>
+                  </a>
+                  <div className="app-actions">
+                    <button 
+                      className="app-edit-btn" 
+                      onClick={() => handleEditApp(app)}
+                      title="Edit"
+                    >
+                      ✎
+                    </button>
+                    <button 
+                      className="app-delete-btn" 
+                      onClick={() => handleDeleteApp(app.id)}
+                      title="Delete"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="apps-empty">
+                <p>No apps yet. Click + to add one.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="header-top">
           <div className="digital-clock">
             <div className="clock-time">
@@ -758,12 +874,12 @@ function App() {
         <div className="overall-progress">
           <div className="overall-progress-label">
             <span>Overall Progress</span>
-            <span className="overall-percentage">{stats.overallProgress.toFixed(1)}%</span>
+            <span className="overall-percentage">{(stats?.overallProgress || 0).toFixed(1)}%</span>
           </div>
           <div className="overall-progress-bar">
             <div 
               className="overall-progress-fill" 
-              style={{ width: `${stats.overallProgress}%` }}
+              style={{ width: `${stats?.overallProgress || 0}%` }}
             ></div>
           </div>
         </div>
