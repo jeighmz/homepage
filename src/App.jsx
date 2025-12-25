@@ -103,6 +103,17 @@ function App() {
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
+  const getFaviconUrl = (url) => {
+    try {
+      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`)
+      const domain = urlObj.hostname
+      // Use Google's favicon service
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
+    } catch (e) {
+      return null
+    }
+  }
+
   // Load from Firestore on mount
   useEffect(() => {
     const loadData = async () => {
@@ -130,7 +141,12 @@ function App() {
         if (savedFavorites) {
           try {
             const parsed = JSON.parse(savedFavorites)
-            setFavorites(parsed)
+            // Ensure all favorites have favicons
+            const favoritesWithFavicons = parsed.map(fav => ({
+              ...fav,
+              favicon: fav.favicon || getFaviconUrl(fav.url)
+            }))
+            setFavorites(favoritesWithFavicons)
           } catch (e) {
             console.error('Failed to load favorites from localStorage', e)
           }
@@ -147,7 +163,12 @@ function App() {
             setGoals(data.goals)
           }
           if (data.favorites && Array.isArray(data.favorites)) {
-            setFavorites(data.favorites)
+            // Ensure all favorites have favicons
+            const favoritesWithFavicons = data.favorites.map(fav => ({
+              ...fav,
+              favicon: fav.favicon || getFaviconUrl(fav.url)
+            }))
+            setFavorites(favoritesWithFavicons)
           }
         } else {
           // Document doesn't exist, try localStorage fallback
@@ -557,11 +578,13 @@ function App() {
     const url = prompt('Enter URL:')
     const title = prompt('Enter title:') || 'New Favorite'
     if (url) {
+      const fullUrl = url.startsWith('http') ? url : `https://${url}`
       const newFavorite = {
         id: Date.now(),
         title,
-        url: url.startsWith('http') ? url : `https://${url}`,
-        icon: '🔗'
+        url: fullUrl,
+        icon: '🔗',
+        favicon: getFaviconUrl(fullUrl)
       }
       setFavorites([...favorites, newFavorite])
     }
@@ -577,9 +600,10 @@ function App() {
     const newTitle = prompt('Enter new title:', favorite.title)
     const newUrl = prompt('Enter new URL:', favorite.url)
     if (newTitle && newUrl) {
+      const fullUrl = newUrl.startsWith('http') ? newUrl : `https://${newUrl}`
       setFavorites(favorites.map(f => 
         f.id === favorite.id 
-          ? { ...f, title: newTitle, url: newUrl.startsWith('http') ? newUrl : `https://${newUrl}` }
+          ? { ...f, title: newTitle, url: fullUrl, favicon: getFaviconUrl(newUrl) }
           : f
       ))
     }
@@ -672,7 +696,19 @@ function App() {
                     rel="noopener noreferrer"
                     className="favorite-link"
                   >
-                    <div className="favorite-icon">{favorite.icon}</div>
+                    <div className="favorite-icon">
+                      {favorite.favicon ? (
+                        <img 
+                          src={favorite.favicon} 
+                          alt={favorite.title}
+                          onError={(e) => {
+                            e.target.style.display = 'none'
+                            e.target.nextSibling.style.display = 'flex'
+                          }}
+                        />
+                      ) : null}
+                      <span style={{ display: favorite.favicon ? 'none' : 'flex' }}>{favorite.icon}</span>
+                    </div>
                     <div className="favorite-title">{favorite.title}</div>
                   </a>
                   <div className="favorite-actions">
